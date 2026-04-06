@@ -11,7 +11,7 @@ Supported Languages: -Norwegian(bokmål) -Spanish
 
 Installation:
 
-1-Clone repository using repo link 
+1-Clone repository using repo link \n
 2-Create a virtual environment: python -m venv .venv 
 3-Activiate the virtual environment: .venv\Scripts\activate 
 4-Install required packages: pip install -r requirements.txt 
