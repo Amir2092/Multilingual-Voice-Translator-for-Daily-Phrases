@@ -4,27 +4,32 @@ import sys
 import threading
 import pygame
 import pyttsx3
-
+from PyQt5.QtCore import Qt
 translator = Translator()
 pygame.mixer.init()
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton,
-    QVBoxLayout, QHBoxLayout, QComboBox, QInputDialog
+    QVBoxLayout, QHBoxLayout, QComboBox, QInputDialog, QMessageBox, QScrollArea, QWidget
 )
 from PyQt5.QtGui import QFont
 
 recognizer = sr.Recognizer()
-
+recognizer.energy_threshold = 250   
+recognizer.dynamic_energy_threshold = True
+recognizer.pause_threshold = 1.0   
+recognizer.non_speaking_duration = 0.5
 
 class SimpleGUI(QWidget):
     def __init__(self):
         super().__init__()
-
+        self.is_recording = False
+        self.presets = set()
         self.setWindowTitle("Speech Translator")
         self.setGeometry(200, 200, 1000, 1000)
+        self.showMaximized()
 
-        font = QFont("Arial", 16)
+        font = QFont("Arial", 22)
 
         # Labels
         self.intro = QLabel(
@@ -59,25 +64,20 @@ class SimpleGUI(QWidget):
             self.language_box.addItem(name, code)
 
         # Presets
-        self.preset_layout = QHBoxLayout()
+        self.preset_container = QWidget()
+        self.preset_layout = QVBoxLayout(self.preset_container)
+        self.preset_layout.setAlignment(Qt.AlignTop)
 
-        phrases = [
-            "I need help",
-            "Where is the nearest bus?",
-            "Thank you"
-        ]
-
-        for phrase in phrases:
-            btn = QPushButton(phrase)
-            btn.setFont(font)
-            btn.clicked.connect(lambda checked, p=phrase: self.use_predefined_text(p))
-            self.preset_layout.addWidget(btn)
-
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.preset_container)
+        
         # Layout
         layout = QVBoxLayout()
+        
         layout.addWidget(self.intro)
         layout.addWidget(self.language_box)
-        layout.addLayout(self.preset_layout)
+        layout.addWidget(scroll_area)
         layout.addWidget(self.original_label)
         layout.addWidget(self.translated_label)
 
@@ -94,23 +94,32 @@ class SimpleGUI(QWidget):
         self.save_button.clicked.connect(self.save_preset)
 
     def microphone(self):
-        with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source)
-            audio = recognizer.listen(source)
-
         try:
-            return recognizer.recognize_google(audio, language="en")
+            with sr.Microphone() as source:
+                recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                self.original_label.setText("Listening...")
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+            self.original_label.setText("Processing...")
+            return recognizer.recognize_google(audio, language="en-US")
+        except sr.WaitTimeoutError:
+            return "Speech not understood"
+        except sr.UnknownValueError:
+            return "Speech not understood"
         except Exception as e:
             print(e)
             return "Speech not understood"
 
     def speak(self, text):
+        if not text:
+            return
+
         def run():
             try:
                 engine = pyttsx3.init()
                 engine.say(text)
                 engine.runAndWait()
                 engine.stop()
+
             except Exception as e:
                 print("Speech error:", e)
 
@@ -118,48 +127,88 @@ class SimpleGUI(QWidget):
 
     def translate(self, text):
         target_lang = self.language_box.currentData()
-
         result = translator.translate(text, dest=target_lang)
         translated_text = result.text 
-
-        self.speak(translated_text)
-
         return translated_text
 
     def handle_record(self):
-        self.recognized_text = self.microphone()
-        self.original_label.setText(self.recognized_text)
+        if self.is_recording:
+            return
+        self.is_recording = True
+        self.record_button.setEnabled(False)
+        self.original_label.setText("Listening...")
+        self.translated_label.setText("")       
+        threading.Thread(target=self.record_and_translate, daemon=True).start()
+        
+    def record_and_translate(self):
+        text = self.microphone()
 
-        if self.recognized_text:
-            translated = self.translate(self.recognized_text)
+        self.recognized_text = text
+        self.original_label.setText(text)
+
+        if text and text != "Speech not understood":
+            self.original_label.setText(text)
+            self.translated_label.setText("Translating...")
+            translated = self.translate(text)
             self.translated_label.setText(translated)
+            self.speak(translated) 
         else:
-            self.translated_label.setText("No text to translate!")
+            self.original_label.setText("Could not understand speech")
+            self.translated_label.setText("")
+
+        self.is_recording = False
+        self.record_button.setEnabled(True)
 
     def use_predefined_text(self, phrase):
+        if self.is_recording:
+            return
+        self.handle_preset(phrase)
+
+    def handle_preset(self, phrase):
         self.recognized_text = phrase
         self.original_label.setText(phrase)
 
+        self.translated_label.setText("Translating...")
         translated = self.translate(phrase)
+
         self.translated_label.setText(translated)
+        self.speak(translated)
 
     def save_preset(self):
+        font = QFont()
+        font.setFamily("Arial")
+        font.setPointSize(20)
         if not self.recognized_text:
             return
-
-        text, ok = QInputDialog.getText(
+        if self.recognized_text=="Speech not understood":
+            msg = QMessageBox()
+            msg.resize(800, 500)
+            msg.setFont(font)
+            msg.setWindowTitle("Alert")
+            msg.setText("You can't set this as a predefined option")
+            msg.setIcon(QMessageBox.Information)
+            msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+            msg.exec_()
+        else:
+            app = QApplication.instance()
+            app.setFont(font)
+            dialog = QInputDialog()
+            dialog.setFont(font)
+            text, ok = dialog.getText(
             self,
             "Save Phrase",
             "Edit phrase:",
             text=self.recognized_text
-        )
-
-        if ok and text:
-            btn = QPushButton(text)
-            btn.setFont(QFont("Arial", 16))
-            btn.clicked.connect(lambda checked, p=text: self.use_predefined_text(p))
-            self.preset_layout.addWidget(btn)
-
+            )
+            if ok and text:
+                if text in self.presets:
+                    QMessageBox.warning(self, "Duplicate", "This preset already exists!")
+                    return
+                btn = QPushButton(text)
+                btn.setFont(QFont("Arial", 22))
+                btn.clicked.connect(lambda checked, p=text: self.use_predefined_text(p))
+                self.preset_layout.addWidget(btn)
+                self.presets.add(text)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
