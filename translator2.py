@@ -24,11 +24,14 @@ class SimpleGUI(QWidget):
     def __init__(self):
         super().__init__()
         self.is_recording = False
+        #only one of each preset is needed
         self.presets = set()
         self.setWindowTitle("Speech Translator")
         self.setGeometry(200, 200, 1000, 1000)
+        #fullscreen
         self.showMaximized()
 
+        #font set to 22 to ensure better readability
         font = QFont("Arial", 22)
 
         # Labels
@@ -55,6 +58,7 @@ class SimpleGUI(QWidget):
         self.language_box = QComboBox()
         self.language_box.setFont(font)
 
+        #languages to translate to
         languages = {
             "Norwegian": "no",
             "Spanish": "es"
@@ -68,6 +72,7 @@ class SimpleGUI(QWidget):
         self.preset_layout = QVBoxLayout(self.preset_container)
         self.preset_layout.setAlignment(Qt.AlignTop)
 
+        #Scroll area so presets dont go off screen when there are a lot of presets
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.preset_container)
@@ -101,6 +106,7 @@ class SimpleGUI(QWidget):
                 audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
             self.original_label.setText("Processing...")
             return recognizer.recognize_google(audio, language="en-US")
+        
         except sr.WaitTimeoutError:
             return "Speech not understood"
         except sr.UnknownValueError:
@@ -114,6 +120,7 @@ class SimpleGUI(QWidget):
             return
 
         def run():
+            #text to speech 
             try:
                 engine = pyttsx3.init()
                 engine.say(text)
@@ -126,6 +133,7 @@ class SimpleGUI(QWidget):
         threading.Thread(target=run, daemon=True).start()
 
     def translate(self, text):
+        #translate into desired language
         target_lang = self.language_box.currentData()
         result = translator.translate(text, dest=target_lang)
         translated_text = result.text 
@@ -135,9 +143,11 @@ class SimpleGUI(QWidget):
         if self.is_recording:
             return
         self.is_recording = True
+        #record button should be disabled during recording to avoid error
         self.record_button.setEnabled(False)
         self.original_label.setText("Listening...")
-        self.translated_label.setText("")       
+        self.translated_label.setText("")
+
         threading.Thread(target=self.record_and_translate, daemon=True).start()
         
     def record_and_translate(self):
@@ -147,6 +157,7 @@ class SimpleGUI(QWidget):
         self.original_label.setText(text)
 
         if text and text != "Speech not understood":
+            #translate speech if speech is understood
             self.original_label.setText(text)
             self.translated_label.setText("Translating...")
             translated = self.translate(text)
@@ -157,7 +168,9 @@ class SimpleGUI(QWidget):
             self.translated_label.setText("")
 
         self.is_recording = False
+        #stop recording afterwards
         self.record_button.setEnabled(True)
+        #enable the record button after the previous recording is finished
 
     def use_predefined_text(self, phrase):
         if self.is_recording:
@@ -175,12 +188,14 @@ class SimpleGUI(QWidget):
         self.speak(translated)
 
     def save_preset(self):
+        #fontsize to 20 for better readability
         font = QFont()
         font.setFamily("Arial")
         font.setPointSize(20)
         if not self.recognized_text:
             return
         if self.recognized_text=="Speech not understood":
+            #to avoid speech not understood being set as a preset
             msg = QMessageBox()
             msg.resize(800, 500)
             msg.setFont(font)
@@ -202,9 +217,11 @@ class SimpleGUI(QWidget):
             )
             if ok and text:
                 if text in self.presets:
+                    #only allow one of each preset
                     QMessageBox.warning(self, "Duplicate", "This preset already exists!")
                     return
                 btn = QPushButton(text)
+                #better readability for the preset buttons
                 btn.setFont(QFont("Arial", 22))
                 btn.clicked.connect(lambda checked, p=text: self.use_predefined_text(p))
                 self.preset_layout.addWidget(btn)
